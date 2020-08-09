@@ -4,6 +4,10 @@ using FluentValidation.Results;
 using NLog;
 using NzbDrone.Common.Extensions;
 using NzbDrone.Common.Http;
+using NzbDrone.Core.MediaFiles;
+using NzbDrone.Core.MediaFiles.MediaInfo;
+using NzbDrone.Core.Notifications.Trakt.Resource;
+using NzbDrone.Core.Qualities;
 using NzbDrone.Core.Validation;
 
 namespace NzbDrone.Core.Notifications.Trakt
@@ -26,45 +30,24 @@ namespace NzbDrone.Core.Notifications.Trakt
 
         public override void OnDownload(DownloadMessage message)
         {
-            var payload = new TraktAddMoviePayload
+            var payload = new TraktCollectMoviesResource
             {
-                Movies = new List<TraktAddMovie>()
+                Movies = new List<TraktCollectMovie>()
             };
 
-            var width = message.MovieFile.MediaInfo?.Width ?? 0;
-            var mediaInfo = "";
+            var traktResolution = MapResolution(message.MovieFile.Quality.Quality.Resolution);
+            var mediaType = MapMediaType(message.MovieFile.Quality.Quality.Source);
+            var audio = MapAudio(message.MovieFile);
 
-            if (width >= 3200)
-            {
-                mediaInfo = "uhd_4k";
-            }
-
-            if (width >= 1800)
-            {
-                mediaInfo = "hd_1080p";
-            }
-
-            if (width >= 1200)
-            {
-                mediaInfo = "hd_720p";
-            }
-
-            if (width >= 700)
-            {
-                mediaInfo = "sd_576p";
-            }
-
-            if (width > 0)
-            {
-                mediaInfo = "sd_480p";
-            }
-
-            payload.Movies.Add(new TraktAddMovie
+            payload.Movies.Add(new TraktCollectMovie
             {
                 Title = message.Movie.Title,
                 Year = message.Movie.Year,
                 CollectedAt = DateTime.Now,
-                Resolution = mediaInfo,
+                Resolution = traktResolution,
+                MediaType = mediaType,
+                AudioChannels = MediaInfoFormatter.FormatAudioChannels(message.MovieFile.MediaInfo).ToString(),
+                Audio = audio,
                 Ids = new TraktMovieIdsResource
                 {
                     Tmdb = message.Movie.TmdbId,
@@ -122,9 +105,9 @@ namespace NzbDrone.Core.Notifications.Trakt
                 if (response != null)
                 {
                     var token = response;
-                    Settings.AccessToken = token.Access_token;
-                    Settings.Expires = DateTime.UtcNow.AddSeconds(token.Expires_in);
-                    Settings.RefreshToken = token.Refresh_token != null ? token.Refresh_token : Settings.RefreshToken;
+                    Settings.AccessToken = token.AccessToken;
+                    Settings.Expires = DateTime.UtcNow.AddSeconds(token.ExpiresIn);
+                    Settings.RefreshToken = token.RefreshToken ?? Settings.RefreshToken;
 
                     if (Definition.Id > 0)
                     {
@@ -136,6 +119,106 @@ namespace NzbDrone.Core.Notifications.Trakt
             {
                 _logger.Warn($"Error refreshing trakt access token");
             }
+        }
+
+        private string MapMediaType(Source source)
+        {
+            var traktSource = string.Empty;
+
+            switch (source)
+            {
+                case Source.BLURAY:
+                    traktSource = "bluray";
+                    break;
+                case Source.WEBDL:
+                    traktSource = "digital";
+                    break;
+                case Source.WEBRIP:
+                    traktSource = "digital";
+                    break;
+                case Source.DVD:
+                    traktSource = "dvd";
+                    break;
+                case Source.TV:
+                    traktSource = "dvd";
+                    break;
+            }
+
+            return traktSource;
+        }
+
+        private string MapResolution(int resolution)
+        {
+            var traktResolution = string.Empty;
+
+            switch (resolution)
+            {
+                case 2160:
+                    traktResolution = "uhd_4k";
+                    break;
+                case 1080:
+                    traktResolution = "hd_1080p";
+                    break;
+                case 720:
+                    traktResolution = "hd_720p";
+                    break;
+                case 576:
+                    traktResolution = "sd_576p";
+                    break;
+                case 480:
+                    traktResolution = "sd_480p";
+                    break;
+            }
+
+            return traktResolution;
+        }
+
+        private string MapAudio(MovieFile movieFile)
+        {
+            var traktAudioFormat = string.Empty;
+
+            var audioCodec = MediaInfoFormatter.FormatAudioCodec(movieFile.MediaInfo, movieFile.SceneName);
+
+            switch (audioCodec)
+            {
+                case "AC3":
+                    traktAudioFormat = "dolby_digital";
+                    break;
+                case "EAC3":
+                    traktAudioFormat = "dolby_digital_plus";
+                    break;
+                case "TrueHD":
+                    traktAudioFormat = "dolby_truehd";
+                    break;
+                case "EAC3 Atmos":
+                case "TrueHD Atmos":
+                    traktAudioFormat = "dolby_atmos";
+                    break;
+                case "DTS":
+                case "DTS-ES":
+                    traktAudioFormat = "dts";
+                    break;
+                case "DTS-HD MA":
+                    traktAudioFormat = "dts_ma";
+                    break;
+                case "DTS-HD HRA":
+                    traktAudioFormat = "dts_hr";
+                    break;
+                case "DTS-X":
+                    traktAudioFormat = "dts_x";
+                    break;
+                case "MP3":
+                    traktAudioFormat = "mp3";
+                    break;
+                case "Vorbis":
+                    traktAudioFormat = "ogg";
+                    break;
+                case "WMA":
+                    traktAudioFormat = "wma";
+                    break;
+            }
+
+            return traktAudioFormat;
         }
     }
 }
